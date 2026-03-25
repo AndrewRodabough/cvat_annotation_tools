@@ -2,7 +2,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 # --- CONFIGURATION ---
-TASK_ID = 10
+TASK_ID = 12
 MODEL_ID = "pth-mmpose-hrnet32"
 SERVER = "http://localhost:8080"
 AUTH = HTTPBasicAuth("REDACTED_EMAIL", "REDACTED_PASSWORD")
@@ -11,14 +11,40 @@ AUTH = HTTPBasicAuth("REDACTED_EMAIL", "REDACTED_PASSWORD")
 # Top level: Model Category | Internal: Model Sublabel -> Your Skeleton Point
 RAW_MAPPING = {
     "body": {
-        "1": "2", "4": "4", "5": "3", "6": "14", "7": "9", "8": "15", "9": "10", 
-        "12": "25", "13": "22", "14": "26", "15": "23", "16": "27", "17": "24"
+        "1": "3",   # nose
+        "4": "5",   # l_ear
+        "5": "1",   # r_ear
+        "6": "11",  # l_shoulder
+        "7": "6",   # r_shoulder
+        "8": "12",  # l_elbow
+        "9": "7",   # r_elbow
+        "12": "23", # l_hip
+        "13": "21", # r_hip
+        "14": "27", # l_knee
+        "15": "25", # r_knee
+        "16": "28", # l_ankle
+        "17": "26", # r_ankle
+        # "18": "41" # Neck (Optional: Recommended for 3D pivot)
     },
     "hands": {
-        "1": "16", "6": "17", "18": "18", "22": "11", "27": "13", "39": "12"
+        "1": "13",  # l_wrist
+        "6": "15",  # l_index_kn
+        "18": "14", # l_pinky_kn
+        "22": "8",   # r_wrist
+        "27": "10",  # r_index_kn
+        "39": "9"    # r_pinky_kn
     },
     "feet": {
-        "1": "38", "2": "37", "3": "34", "4": "32", "5": "31", "6": "28"
+        "1": "39",  # l_big_toe
+        "2": "40",  # l_small_toe
+        "3": "35",  # l_heel
+        "4": "33",  # r_big_toe
+        "5": "34",  # r_small_toe
+        "6": "29"   # r_heel
+    },
+    "face": {
+        "39": "4",  # l_inner_eye
+        "42": "2"   # r_inner_eye
     }
 }
 
