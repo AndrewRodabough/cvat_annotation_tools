@@ -519,6 +519,8 @@ def _ask_ranges_preview(video_path: str, duration: float) -> list[tuple[float, f
 
         current_frame = 0
         positioned_frame = -1
+        decoded_frame_index = -1
+        decoded_frame = None
         playing = True
         ranges: list[tuple[float, float]] = []
         mark_in: float | None = None
@@ -568,23 +570,30 @@ def _ask_ranges_preview(video_path: str, duration: float) -> list[tuple[float, f
         while True:
             current_frame = max(0, min(current_frame, total_frames - 1))
 
-            # Seeking on every iteration is very expensive for large 4K videos.
-            # Only seek when the requested frame is not the next sequential frame.
-            if positioned_frame != current_frame:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-                positioned_frame = current_frame
+            # Decode only when frame index changes to avoid repeated expensive seeks while paused.
+            if decoded_frame is None or decoded_frame_index != current_frame:
+                # Seeking on every iteration is very expensive for large 4K videos.
+                # Only seek when the requested frame is not the next sequential frame.
+                if positioned_frame != current_frame:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                    positioned_frame = current_frame
 
-            ret, frame = cap.read()
-            if not ret:
-                break
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            positioned_frame = current_frame + 1
+                positioned_frame = current_frame + 1
 
-            # Downscale frame if needed for performance
-            if scale_factor < 1.0:
-                new_width = int(frame.shape[1] * scale_factor)
-                new_height = int(frame.shape[0] * scale_factor)
-                frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                # Downscale frame if needed for performance
+                if scale_factor < 1.0:
+                    new_width = int(frame.shape[1] * scale_factor)
+                    new_height = int(frame.shape[0] * scale_factor)
+                    frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+
+                decoded_frame = frame
+                decoded_frame_index = current_frame
+
+            frame = decoded_frame.copy()
 
             now_s = current_frame / fps
             _draw_overlay(
@@ -793,6 +802,8 @@ def _ask_crop_roi(video_path: str) -> tuple[int, int, int, int] | None:
 
         current_frame = 0
         positioned_frame = -1
+        decoded_frame_index = -1
+        decoded_frame = None
         playing = False
         crop_display_rect: tuple[int, int, int, int] | None = None
         duration_s = (total_frames - 1) / fps if total_frames > 1 else 0.0
@@ -843,22 +854,26 @@ def _ask_crop_roi(video_path: str) -> tuple[int, int, int, int] | None:
         while True:
             current_frame = max(0, min(current_frame, total_frames - 1))
 
-            if positioned_frame != current_frame:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-                positioned_frame = current_frame
+            if decoded_frame is None or decoded_frame_index != current_frame:
+                if positioned_frame != current_frame:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                    positioned_frame = current_frame
 
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                break
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
 
-            positioned_frame = current_frame + 1
+                positioned_frame = current_frame + 1
 
-            if scale < 1.0:
-                disp_w = max(2, int(round(frame.shape[1] * scale)))
-                disp_h = max(2, int(round(frame.shape[0] * scale)))
-                display = cv2.resize(frame, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
-            else:
-                display = frame.copy()
+                if scale < 1.0:
+                    disp_w = max(2, int(round(frame.shape[1] * scale)))
+                    disp_h = max(2, int(round(frame.shape[0] * scale)))
+                    frame = cv2.resize(frame, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
+
+                decoded_frame = frame
+                decoded_frame_index = current_frame
+
+            display = decoded_frame.copy()
 
             if crop_display_rect is not None:
                 x, y, w, h = crop_display_rect
