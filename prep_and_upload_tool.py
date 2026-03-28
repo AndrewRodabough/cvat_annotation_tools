@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from time import perf_counter
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -26,8 +27,6 @@ VIDEO_EXTENSIONS = [
 TARGET_ANNOTATION_FPS = 7.5
 SEGMENT_SIZE = 500
 SEGMENT_OVERLAP = 3
-UPLOAD_IMAGE_QUALITY = 96
-EXTRACTION_JPEG_QUALITY = 92
 FAST_EXTRACT_MAX_DIMENSION = 1920
 UPLOAD_BATCH_SIZE = 100
 SCRUBBER_HEIGHT = 26
@@ -39,6 +38,18 @@ OVERLAY_TEXT_THICKNESS = 2
 OVERLAY_TEXT_OUTLINE_THICKNESS = 4
 OVERLAY_LINE_START_Y = 30
 OVERLAY_LINE_SPACING = 28
+POPUP_WINDOW_DEFAULT_WIDTH = 800
+POPUP_WINDOW_DEFAULT_HEIGHT = 1400
+
+
+def _quality_for_max_edge(max_edge: int) -> int:
+    # User-configured quality tiers by output resolution.
+    # >1440p -> 90, >1080p and <=1440p -> 92, <=1080p -> 96.
+    if max_edge > 1440:
+        return 90
+    if max_edge > 1080:
+        return 92
+    return 96
 
 
 @contextmanager
@@ -228,6 +239,36 @@ def _build_ffmpeg_trim_cmd(
     ]
 
 
+def _build_ffmpeg_trim_copy_cmd(
+    src_path: str,
+    dst_path: str,
+    start_s: float,
+    end_s: float,
+) -> list[str]:
+    duration = max(0.001, end_s - start_s)
+    return [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        _format_seconds(start_s),
+        "-i",
+        src_path,
+        "-t",
+        _format_seconds(duration),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "make_zero",
+        dst_path,
+    ]
+
+
 def _make_clips_from_ranges(video_path: str, work_dir: str, ranges: list[tuple[float, float]]) -> list[str]:
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg is required but not found in PATH")
@@ -239,32 +280,56 @@ def _make_clips_from_ranges(video_path: str, work_dir: str, ranges: list[tuple[f
         output_paths.append(video_path)
         return output_paths
 
+    total = len(ranges)
     for i, (start_s, end_s) in enumerate(ranges, start=1):
         clip_path = str(Path(work_dir) / f"{stem}_clip_{i:03d}.mp4")
-        cmd = _build_ffmpeg_trim_cmd(video_path, clip_path, start_s, end_s, fallback=False)
+        clip_duration = max(0.0, end_s - start_s)
+        print(
+            f"  Trimming clip {i}/{total}: {start_s:.3f}s -> {end_s:.3f}s "
+            f"(duration {clip_duration:.1f}s)..."
+        )
+        t0 = perf_counter()
+        # Fast path: stream-copy trim to avoid expensive 4K re-encode waits.
+        copy_cmd = _build_ffmpeg_trim_copy_cmd(video_path, clip_path, start_s, end_s)
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as primary_exc:
-            primary_err = (primary_exc.stderr or "").strip()
-            print("  Primary trim encode failed; retrying with fallback settings...")
-            retry_cmd = _build_ffmpeg_trim_cmd(
+            subprocess.run(copy_cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as copy_exc:
+            copy_err = (copy_exc.stderr or "").strip()
+            print("  Fast copy-trim failed; retrying with re-encode settings...")
+            primary_cmd = _build_ffmpeg_trim_cmd(
                 video_path,
                 clip_path,
                 start_s,
                 end_s,
-                fallback=True,
+                fallback=False,
             )
             try:
-                subprocess.run(retry_cmd, check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as retry_exc:
-                retry_err = (retry_exc.stderr or "").strip()
-                combined = (
-                    "ffmpeg trim failed. "
-                    f"primary_exit={primary_exc.returncode}, fallback_exit={retry_exc.returncode}.\n"
-                    f"Primary stderr:\n{primary_err or '<empty>'}\n"
-                    f"Fallback stderr:\n{retry_err or '<empty>'}"
+                subprocess.run(primary_cmd, check=True, capture_output=True, text=True)
+            except subprocess.CalledProcessError as primary_exc:
+                primary_err = (primary_exc.stderr or "").strip()
+                print("  Primary trim encode failed; retrying with fallback settings...")
+                retry_cmd = _build_ffmpeg_trim_cmd(
+                    video_path,
+                    clip_path,
+                    start_s,
+                    end_s,
+                    fallback=True,
                 )
-                raise RuntimeError(combined) from retry_exc
+                try:
+                    subprocess.run(retry_cmd, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError as retry_exc:
+                    retry_err = (retry_exc.stderr or "").strip()
+                    combined = (
+                        "ffmpeg trim failed across copy + encode attempts. "
+                        f"copy_exit={copy_exc.returncode}, "
+                        f"primary_exit={primary_exc.returncode}, fallback_exit={retry_exc.returncode}.\n"
+                        f"Copy stderr:\n{copy_err or '<empty>'}\n"
+                        f"Primary stderr:\n{primary_err or '<empty>'}\n"
+                        f"Fallback stderr:\n{retry_err or '<empty>'}"
+                    )
+                    raise RuntimeError(combined) from retry_exc
+            elapsed = perf_counter() - t0
+            print(f"  ✓ Finished clip {i}/{total} in {elapsed:.1f}s")
         output_paths.append(clip_path)
 
     return output_paths
@@ -453,6 +518,7 @@ def _ask_ranges_preview(video_path: str, duration: float) -> list[tuple[float, f
             print(f"   Preview will be downscaled to {int(frame_width * scale_factor)}x{int(frame_height * scale_factor)} for performance")
 
         current_frame = 0
+        positioned_frame = -1
         playing = True
         ranges: list[tuple[float, float]] = []
         mark_in: float | None = None
@@ -466,6 +532,11 @@ def _ask_ranges_preview(video_path: str, duration: float) -> list[tuple[float, f
         window = f"Preview: {Path(video_path).name}"
         with _suppress_stderr():
             cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(
+                window,
+                POPUP_WINDOW_DEFAULT_WIDTH,
+                POPUP_WINDOW_DEFAULT_HEIGHT,
+            )
 
         def _on_mouse(event, x, y, flags, param):
             del flags
@@ -497,10 +568,17 @@ def _ask_ranges_preview(video_path: str, duration: float) -> list[tuple[float, f
         while True:
             current_frame = max(0, min(current_frame, total_frames - 1))
 
-            cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+            # Seeking on every iteration is very expensive for large 4K videos.
+            # Only seek when the requested frame is not the next sequential frame.
+            if positioned_frame != current_frame:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                positioned_frame = current_frame
+
             ret, frame = cap.read()
             if not ret:
                 break
+
+            positioned_frame = current_frame + 1
 
             # Downscale frame if needed for performance
             if scale_factor < 1.0:
@@ -648,18 +726,38 @@ def _print_ranges(ranges: list[tuple[float, float]]) -> None:
 
 def _ask_resolution_choice(video_path: str) -> int | None:
     width, height = _get_video_dimensions(video_path)
+    longest_edge = max(width, height)
+
+    # 1080p-or-smaller sources keep full resolution by default and skip the prompt.
+    if longest_edge <= 1920:
+        return None
+
     print("\nExtraction resolution for this video?")
     print(f"  source: {width}x{height}")
     print("  [Enter] keep full resolution")
-    print("  1 = 1440p max edge")
-    print("  2 = 1080p max edge")
+
+    options: dict[str, int] = {}
+    if longest_edge <= 2560:
+        # 1440p class source: only offer downscale to 1080p.
+        print("  1 = 1080p short edge")
+        options["1"] = 1080
+    else:
+        print("  1 = 1440p short edge")
+        print("  2 = 1080p short edge")
+        options["1"] = 1440
+        options["2"] = 1080
+
     choice = input("Select resolution mode: ").strip().lower()
     if not choice:
         return None
-    if choice in ("1", "1440", "1440p"):
-        return 1440
-    if choice in ("2", "1080", "1080p"):
+
+    if choice in options:
+        return options[choice]
+    if choice in ("1080", "1080p"):
         return 1080
+    if longest_edge > 2560 and choice in ("1440", "1440p"):
+        return 1440
+
     print("Unknown choice; keeping full resolution.")
     return None
 
@@ -675,41 +773,200 @@ def _ask_crop_roi(video_path: str) -> tuple[int, int, int, int] | None:
         return None
 
     try:
-        ret, frame = cap.read()
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+        if fps <= 0:
+            fps = 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 1)
+        if total_frames <= 0:
+            total_frames = 1
+
+        src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        if src_w <= 0 or src_h <= 0:
+            print("Could not determine video dimensions; skipping crop.")
+            return None
+
+        scale = 1.0
+        max_preview = 1920
+        if max(src_w, src_h) > max_preview:
+            scale = max_preview / float(max(src_w, src_h))
+
+        current_frame = 0
+        positioned_frame = -1
+        playing = False
+        crop_display_rect: tuple[int, int, int, int] | None = None
+        duration_s = (total_frames - 1) / fps if total_frames > 1 else 0.0
+        mouse_state = {
+            "dragging": False,
+            "seek_requested": False,
+            "seek_seconds": 0.0,
+            "scrubber": (0, 0, 0, 0),
+        }
+        window_name = f"Crop ROI: {Path(video_path).name}"
+
+        print("\nCrop review controls:")
+        print("  r set/update crop on current frame")
+        print("  c clear crop")
+        print("  space play/pause | j/l -/+5s | ,/. -/+1 frame")
+        print("  mouse drag on scrubber to seek")
+        print("  Enter accept crop | q skip crop")
+
+        with _suppress_stderr():
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(
+                window_name,
+                POPUP_WINDOW_DEFAULT_WIDTH,
+                POPUP_WINDOW_DEFAULT_HEIGHT,
+            )
+
+        def _on_mouse(event, x, y, flags, param):
+            del flags
+            del param
+            x0, y0, x1, y1 = mouse_state["scrubber"]
+            in_bar = x0 <= x <= x1 and y0 <= y <= y1
+
+            if event == cv2.EVENT_LBUTTONDOWN and in_bar:
+                mouse_state["dragging"] = True
+                mouse_state["seek_seconds"] = _time_from_scrubber_x(x, duration_s, x0, x1)
+                mouse_state["seek_requested"] = True
+            elif event == cv2.EVENT_MOUSEMOVE and mouse_state["dragging"]:
+                mouse_state["seek_seconds"] = _time_from_scrubber_x(x, duration_s, x0, x1)
+                mouse_state["seek_requested"] = True
+            elif event == cv2.EVENT_LBUTTONUP:
+                if mouse_state["dragging"]:
+                    mouse_state["seek_seconds"] = _time_from_scrubber_x(x, duration_s, x0, x1)
+                    mouse_state["seek_requested"] = True
+                mouse_state["dragging"] = False
+
+        cv2.setMouseCallback(window_name, _on_mouse)
+
+        while True:
+            current_frame = max(0, min(current_frame, total_frames - 1))
+
+            if positioned_frame != current_frame:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                positioned_frame = current_frame
+
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                break
+
+            positioned_frame = current_frame + 1
+
+            if scale < 1.0:
+                disp_w = max(2, int(round(frame.shape[1] * scale)))
+                disp_h = max(2, int(round(frame.shape[0] * scale)))
+                display = cv2.resize(frame, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
+            else:
+                display = frame.copy()
+
+            if crop_display_rect is not None:
+                x, y, w, h = crop_display_rect
+                cv2.rectangle(display, (x, y), (x + w, y + h), (0, 255, 255), 2)
+
+            time_s = current_frame / fps
+            cv2.putText(
+                display,
+                f"frame {current_frame}/{total_frames - 1}  time {time_s:.2f}s",
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                display,
+                "r=set crop  c=clear  space=play  j/l=5s  ,/.=1f  enter=accept  q=skip",
+                (12, 56),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            mouse_state["scrubber"] = _draw_scrubber(display, time_s, duration_s, [], None)
+
+            with _suppress_stderr():
+                cv2.imshow(window_name, display)
+
+            delay_ms = max(1, int(1000 / fps)) if playing else 30
+            with _suppress_stderr():
+                key = cv2.waitKey(delay_ms) & 0xFF
+
+            if mouse_state["seek_requested"]:
+                target_s = max(0.0, min(mouse_state["seek_seconds"], duration_s))
+                current_frame = int(round(target_s * fps))
+                playing = False
+                mouse_state["seek_requested"] = False
+                continue
+
+            if key == 255:
+                if playing:
+                    current_frame += 1
+                    if current_frame >= total_frames:
+                        current_frame = total_frames - 1
+                        playing = False
+                continue
+
+            if key == ord(" "):
+                playing = not playing
+            elif key == ord("j"):
+                current_frame -= int(5 * fps)
+                playing = False
+            elif key == ord("l"):
+                current_frame += int(5 * fps)
+                playing = False
+            elif key == ord(","):
+                current_frame -= 1
+                playing = False
+            elif key == ord("."):
+                current_frame += 1
+                playing = False
+            elif key == ord("c"):
+                crop_display_rect = None
+                print("Crop cleared")
+            elif key == ord("r"):
+                with _suppress_stderr():
+                    x, y, rw, rh = cv2.selectROI(
+                        window_name,
+                        display,
+                        fromCenter=False,
+                        showCrosshair=True,
+                    )
+                if rw > 0 and rh > 0:
+                    crop_display_rect = (int(x), int(y), int(rw), int(rh))
+                    print(f"Crop candidate set: x={x}, y={y}, w={rw}, h={rh}")
+                else:
+                    print("Crop selection cancelled")
+            elif key in (13, 10):
+                if crop_display_rect is None:
+                    print("No crop selected; keeping full frame.")
+                    return None
+
+                x, y, rw, rh = crop_display_rect
+                crop_x = int(round(x / scale))
+                crop_y = int(round(y / scale))
+                crop_w = int(round(rw / scale))
+                crop_h = int(round(rh / scale))
+
+                crop_x = max(0, min(crop_x, src_w - 1))
+                crop_y = max(0, min(crop_y, src_h - 1))
+                crop_w = max(1, min(crop_w, src_w - crop_x))
+                crop_h = max(1, min(crop_h, src_h - crop_y))
+
+                print(f"Crop selected: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h}")
+                return (crop_x, crop_y, crop_w, crop_h)
+            elif key in (ord("q"), 27):
+                print("Crop skipped.")
+                return None
+
+        print("Could not complete crop selection; skipping crop.")
+        return None
     finally:
         cap.release()
-
-    if not ret or frame is None:
-        print("Could not read first frame for crop selection; skipping crop.")
-        return None
-
-    display = frame
-    scale = 1.0
-    max_preview = 1920
-    h, w = frame.shape[:2]
-    if max(h, w) > max_preview:
-        scale = max_preview / float(max(h, w))
-        new_w = max(2, int(round(w * scale)))
-        new_h = max(2, int(round(h * scale)))
-        display = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-    window_name = f"Crop ROI: {Path(video_path).name}"
-    print("Draw crop rectangle and press ENTER/SPACE. Press C to cancel crop.")
-    with _suppress_stderr():
-        x, y, rw, rh = cv2.selectROI(window_name, display, fromCenter=False, showCrosshair=True)
-        cv2.destroyWindow(window_name)
-
-    if rw <= 0 or rh <= 0:
-        print("Crop cancelled.")
-        return None
-
-    crop_x = int(round(x / scale))
-    crop_y = int(round(y / scale))
-    crop_w = int(round(rw / scale))
-    crop_h = int(round(rh / scale))
-
-    print(f"Crop selected: x={crop_x}, y={crop_y}, w={crop_w}, h={crop_h}")
-    return (crop_x, crop_y, crop_w, crop_h)
+        with _suppress_stderr():
+            cv2.destroyAllWindows()
 
 
 def _upload_single_clip(
@@ -723,22 +980,37 @@ def _upload_single_clip(
     try:
         fps = _get_video_fps(clip_path)
         width, height = _get_video_dimensions(clip_path)
+
+        base_width, base_height = width, height
+        if crop_rect is not None:
+            _, _, crop_w, crop_h = crop_rect
+            base_width, base_height = crop_w, crop_h
+
+        output_short_edge = max_dimension if max_dimension is not None else min(base_width, base_height)
+        image_quality = _quality_for_max_edge(output_short_edge)
         frame_step = _frame_step_from_fps(fps)
         print(
             f"[{clip_name}] source fps={fps:.3f}, frame_step={frame_step} "
             f"(extracting every {frame_step} frames, target ~{TARGET_ANNOTATION_FPS} fps)"
         )
         if max_dimension is not None:
+            out_width, out_height = base_width, base_height
+            shortest = min(base_width, base_height)
+            if shortest > max_dimension:
+                scale = max_dimension / float(shortest)
+                out_width = max(2, int(round(base_width * scale)))
+                out_height = max(2, int(round(base_height * scale)))
             print(
-                f"[{clip_name}] fast extract resize: {width}x{height} -> "
-                f"max edge {max_dimension}"
+                f"[{clip_name}] fast extract resize: {base_width}x{base_height} -> "
+                f"{out_width}x{out_height} (short edge {max_dimension})"
             )
+        print(f"[{clip_name}] quality tier: short_edge={output_short_edge} -> jpeg quality {image_quality}")
 
         video_to_frames(
             clip_path,
             temp_frames,
             image_format="jpg",
-            jpeg_quality=EXTRACTION_JPEG_QUALITY,
+            jpeg_quality=image_quality,
             frame_skip=frame_step,
             max_dimension=max_dimension,
             crop_rect=crop_rect,
@@ -751,7 +1023,7 @@ def _upload_single_clip(
             frame_step=1,
             segment_size=SEGMENT_SIZE,
             overlap=SEGMENT_OVERLAP,
-            image_quality=UPLOAD_IMAGE_QUALITY,
+            image_quality=image_quality,
         )
 
         shutil.rmtree(temp_frames, ignore_errors=True)
@@ -825,6 +1097,7 @@ def main() -> None:
 
                     # Trim clips in foreground (fast)
                     try:
+                        print("Starting trim stage (this can take a few minutes for long/high-res clips)...")
                         clips = _make_clips_from_ranges(video_path, temp_clips_root, ranges)
                         print(f"✓ Trimmed {len(clips)} clip(s) from {Path(video_path).name}")
 
