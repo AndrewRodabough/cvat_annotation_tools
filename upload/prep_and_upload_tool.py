@@ -4,42 +4,64 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import termios
+import atexit
 from time import perf_counter
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from tkinter import Tk, filedialog
-
-# Reduce noisy Qt backend messages emitted by OpenCV HighGUI on some Linux setups.
-os.environ.setdefault("QT_LOGGING_RULES", "*.debug=false;qt.qpa.*=false")
-
 import cv2
-
 from to_frames import video_to_frames
-from upload_videos import PROJECT_ID, process_video_frames_for_upload
+from dotenv import load_dotenv
+from upload_videos import process_video_frames_for_upload
+from pathlib import Path
+import sys
+import yaml
 
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-VIDEO_EXTENSIONS = [
-    ("Video files", "*.mp4 *.mov *.avi *.mkv *.wmv *.m4v *.webm"),
-    ("All files", "*.*"),
-]
+from utils.get_env import get_int_env_var, get_str_env_var
 
-TARGET_ANNOTATION_FPS = 7.5
-SEGMENT_SIZE = 500
-SEGMENT_OVERLAP = 3
-FAST_EXTRACT_MAX_DIMENSION = 1920
-UPLOAD_BATCH_SIZE = 100
-SCRUBBER_HEIGHT = 26
-SCRUBBER_MARGIN = 18
-OVERLAY_TEXT_SCALE = 0.9
-OVERLAY_TEXT_COLOR = (255, 255, 255)
-OVERLAY_TEXT_OUTLINE_COLOR = (0, 0, 0)
-OVERLAY_TEXT_THICKNESS = 2
-OVERLAY_TEXT_OUTLINE_THICKNESS = 4
-OVERLAY_LINE_START_Y = 30
-OVERLAY_LINE_SPACING = 28
-POPUP_WINDOW_DEFAULT_WIDTH = 800
-POPUP_WINDOW_DEFAULT_HEIGHT = 1400
+env_path = project_root / ".env"
+load_dotenv(dotenv_path=env_path)
+
+PROJECT_ID = get_int_env_var("PROJECT_ID")
+CONFIG_PATH = project_root / "upload" / "config.yaml"
+
+with CONFIG_PATH.open("r", encoding="utf-8") as f:
+    cfg = yaml.safe_load(f) or {}
+
+def _need(name: str):
+    if name not in cfg:
+        raise ValueError(f"Missing required config key: {name}")
+    return cfg[name]
+
+TARGET_ANNOTATION_FPS = float(_need("TARGET_ANNOTATION_FPS"))
+SEGMENT_SIZE = int(_need("SEGMENT_SIZE"))
+SEGMENT_OVERLAP = int(_need("SEGMENT_OVERLAP"))
+FAST_EXTRACT_MAX_DIMENSION = int(_need("FAST_EXTRACT_MAX_DIMENSION"))
+UPLOAD_BATCH_SIZE = int(_need("UPLOAD_BATCH_SIZE"))
+
+SCRUBBER_HEIGHT = int(_need("SCRUBBER_HEIGHT"))
+SCRUBBER_MARGIN = int(_need("SCRUBBER_MARGIN"))
+OVERLAY_TEXT_SCALE = float(_need("OVERLAY_TEXT_SCALE"))
+OVERLAY_TEXT_COLOR = tuple(_need("OVERLAY_TEXT_COLOR"))
+OVERLAY_TEXT_OUTLINE_COLOR = tuple(_need("OVERLAY_TEXT_OUTLINE_COLOR"))
+OVERLAY_TEXT_THICKNESS = int(_need("OVERLAY_TEXT_THICKNESS"))
+OVERLAY_TEXT_OUTLINE_THICKNESS = int(_need("OVERLAY_TEXT_OUTLINE_THICKNESS"))
+OVERLAY_LINE_START_Y = int(_need("OVERLAY_LINE_START_Y"))
+OVERLAY_LINE_SPACING = int(_need("OVERLAY_LINE_SPACING"))
+POPUP_WINDOW_DEFAULT_WIDTH = int(_need("POPUP_WINDOW_DEFAULT_WIDTH"))
+POPUP_WINDOW_DEFAULT_HEIGHT = int(_need("POPUP_WINDOW_DEFAULT_HEIGHT"))
+
+raw_video_extensions = _need("VIDEO_EXTENSIONS")
+if not isinstance(raw_video_extensions, list):
+    raise ValueError("VIDEO_EXTENSIONS must be a list in config.yaml")
+
+VIDEO_EXTENSIONS = [tuple(item) for item in raw_video_extensions]
+
+_CAPTURED_TTY_STATE = None
 
 
 def _quality_for_max_edge(max_edge: int) -> int:
@@ -50,6 +72,63 @@ def _quality_for_max_edge(max_edge: int) -> int:
     if max_edge > 1080:
         return 92
     return 96
+
+
+def _get_tty_fd() -> tuple[int | None, bool]:
+    """Return a tty file descriptor and whether caller should close it."""
+    try:
+        stdin_fd = sys.stdin.fileno()
+        if os.isatty(stdin_fd):
+            return stdin_fd, False
+    except (AttributeError, OSError, ValueError):
+        pass
+
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR)
+        return fd, True
+    except OSError:
+        return None, False
+
+
+def _capture_terminal_state() -> None:
+    global _CAPTURED_TTY_STATE
+    fd, should_close = _get_tty_fd()
+    if fd is None:
+        return
+    try:
+        _CAPTURED_TTY_STATE = termios.tcgetattr(fd)
+    except termios.error:
+        _CAPTURED_TTY_STATE = None
+    finally:
+        if should_close:
+            os.close(fd)
+
+
+def _restore_terminal_state() -> None:
+    fd, should_close = _get_tty_fd()
+    try:
+        if fd is not None and _CAPTURED_TTY_STATE is not None:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, _CAPTURED_TTY_STATE)
+                return
+            except termios.error:
+                pass
+    finally:
+        if should_close and fd is not None:
+            os.close(fd)
+
+    # Fallback: force sane terminal mode if termios restore failed.
+    try:
+        with open("/dev/tty", "r", encoding="utf-8", errors="ignore") as tty_in:
+            subprocess.run(
+                ["stty", "sane"],
+                stdin=tty_in,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+    except OSError:
+        pass
 
 
 @contextmanager
@@ -74,6 +153,35 @@ def _suppress_stderr():
             os.close(saved_stderr_fd)
             if devnull_fd is not None:
                 os.close(devnull_fd)
+
+
+def _restore_terminal_after_cv() -> None:
+    """Close HighGUI windows and flush pending key events before terminal prompts."""
+    with _suppress_stderr():
+        cv2.destroyAllWindows()
+        cv2.waitKey(1)
+        cv2.waitKey(1)
+    _restore_terminal_state()
+
+
+def _prompt_input(prompt: str) -> str:
+    """Read prompt input robustly, with /dev/tty fallback when stdin gets detached."""
+    try:
+        return input(prompt)
+    except EOFError:
+        pass
+
+    try:
+        with open("/dev/tty", "r", encoding="utf-8", errors="ignore") as tty_in:
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+            return tty_in.readline().rstrip("\n")
+    except OSError as exc:
+        raise RuntimeError(f"Unable to read terminal input for prompt: {prompt}") from exc
+
+
+_capture_terminal_state()
+atexit.register(_restore_terminal_state)
 
 
 def choose_videos() -> list[str]:
@@ -370,7 +478,7 @@ def _ask_ranges_text(video_path: str, duration: float) -> list[tuple[float, floa
     )
     print("Leave blank to keep the full video.")
 
-    raw = input("Keep ranges: ")
+    raw = _prompt_input("Keep ranges: ")
     ranges = _parse_ranges(raw)
     return _finalize_ranges(ranges, duration)
 
@@ -519,8 +627,6 @@ def _ask_ranges_preview(video_path: str, duration: float) -> list[tuple[float, f
 
         current_frame = 0
         positioned_frame = -1
-        decoded_frame_index = -1
-        decoded_frame = None
         playing = True
         ranges: list[tuple[float, float]] = []
         mark_in: float | None = None
@@ -570,30 +676,23 @@ def _ask_ranges_preview(video_path: str, duration: float) -> list[tuple[float, f
         while True:
             current_frame = max(0, min(current_frame, total_frames - 1))
 
-            # Decode only when frame index changes to avoid repeated expensive seeks while paused.
-            if decoded_frame is None or decoded_frame_index != current_frame:
-                # Seeking on every iteration is very expensive for large 4K videos.
-                # Only seek when the requested frame is not the next sequential frame.
-                if positioned_frame != current_frame:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-                    positioned_frame = current_frame
+            # Seeking on every iteration is very expensive for large 4K videos.
+            # Only seek when the requested frame is not the next sequential frame.
+            if positioned_frame != current_frame:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                positioned_frame = current_frame
 
-                ret, frame = cap.read()
-                if not ret:
-                    break
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-                positioned_frame = current_frame + 1
+            positioned_frame = current_frame + 1
 
-                # Downscale frame if needed for performance
-                if scale_factor < 1.0:
-                    new_width = int(frame.shape[1] * scale_factor)
-                    new_height = int(frame.shape[0] * scale_factor)
-                    frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
-
-                decoded_frame = frame
-                decoded_frame_index = current_frame
-
-            frame = decoded_frame.copy()
+            # Downscale frame if needed for performance
+            if scale_factor < 1.0:
+                new_width = int(frame.shape[1] * scale_factor)
+                new_height = int(frame.shape[0] * scale_factor)
+                frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
 
             now_s = current_frame / fps
             _draw_overlay(
@@ -701,8 +800,7 @@ def _ask_ranges_preview(video_path: str, duration: float) -> list[tuple[float, f
         return _finalize_ranges(ranges, duration)
     finally:
         cap.release()
-        with _suppress_stderr():
-            cv2.destroyAllWindows()
+        _restore_terminal_after_cv()
 
 
 def _ask_ranges_for_video(video_path: str) -> list[tuple[float, float]] | None:
@@ -756,7 +854,7 @@ def _ask_resolution_choice(video_path: str) -> int | None:
         options["1"] = 1440
         options["2"] = 1080
 
-    choice = input("Select resolution mode: ").strip().lower()
+    choice = _prompt_input("Select resolution mode: ").strip().lower()
     if not choice:
         return None
 
@@ -772,7 +870,7 @@ def _ask_resolution_choice(video_path: str) -> int | None:
 
 
 def _ask_crop_roi(video_path: str) -> tuple[int, int, int, int] | None:
-    answer = input("Crop this video before frame extraction? [y/N]: ").strip().lower()
+    answer = _prompt_input("Crop this video before frame extraction? [y/N]: ").strip().lower()
     if answer not in ("y", "yes"):
         return None
 
@@ -802,8 +900,6 @@ def _ask_crop_roi(video_path: str) -> tuple[int, int, int, int] | None:
 
         current_frame = 0
         positioned_frame = -1
-        decoded_frame_index = -1
-        decoded_frame = None
         playing = False
         crop_display_rect: tuple[int, int, int, int] | None = None
         duration_s = (total_frames - 1) / fps if total_frames > 1 else 0.0
@@ -854,26 +950,22 @@ def _ask_crop_roi(video_path: str) -> tuple[int, int, int, int] | None:
         while True:
             current_frame = max(0, min(current_frame, total_frames - 1))
 
-            if decoded_frame is None or decoded_frame_index != current_frame:
-                if positioned_frame != current_frame:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-                    positioned_frame = current_frame
+            if positioned_frame != current_frame:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                positioned_frame = current_frame
 
-                ret, frame = cap.read()
-                if not ret or frame is None:
-                    break
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                break
 
-                positioned_frame = current_frame + 1
+            positioned_frame = current_frame + 1
 
-                if scale < 1.0:
-                    disp_w = max(2, int(round(frame.shape[1] * scale)))
-                    disp_h = max(2, int(round(frame.shape[0] * scale)))
-                    frame = cv2.resize(frame, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
-
-                decoded_frame = frame
-                decoded_frame_index = current_frame
-
-            display = decoded_frame.copy()
+            if scale < 1.0:
+                disp_w = max(2, int(round(frame.shape[1] * scale)))
+                disp_h = max(2, int(round(frame.shape[0] * scale)))
+                display = cv2.resize(frame, (disp_w, disp_h), interpolation=cv2.INTER_LINEAR)
+            else:
+                display = frame.copy()
 
             if crop_display_rect is not None:
                 x, y, w, h = crop_display_rect
@@ -949,6 +1041,9 @@ def _ask_crop_roi(video_path: str) -> tuple[int, int, int, int] | None:
                         fromCenter=False,
                         showCrosshair=True,
                     )
+                # selectROI installs its own mouse handler; restore scrubber callback after it returns.
+                mouse_state["dragging"] = False
+                cv2.setMouseCallback(window_name, _on_mouse)
                 if rw > 0 and rh > 0:
                     crop_display_rect = (int(x), int(y), int(rw), int(rh))
                     print(f"Crop candidate set: x={x}, y={y}, w={rw}, h={rh}")
@@ -980,8 +1075,7 @@ def _ask_crop_roi(video_path: str) -> tuple[int, int, int, int] | None:
         return None
     finally:
         cap.release()
-        with _suppress_stderr():
-            cv2.destroyAllWindows()
+        _restore_terminal_after_cv()
 
 
 def _upload_single_clip(
@@ -1190,6 +1284,8 @@ def main() -> None:
                         print(f"  Frames: {r['frames_dir']}")
 
     finally:
+        _restore_terminal_after_cv()
+        _restore_terminal_state()
         shutil.rmtree(temp_clips_root, ignore_errors=True)
 
 

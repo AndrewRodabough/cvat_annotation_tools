@@ -1,18 +1,26 @@
 import argparse
 import mimetypes
 import os
+import sys
 import time
 from pathlib import Path
-
 import requests
+from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-# Hardcoded config per user request.
-SERVER = "http://localhost:8080"
-EMAIL = "REDACTED_EMAIL"
-PASSWORD = "REDACTED_PASSWORD"
-PROJECT_ID = 4
+from utils.get_env import get_int_env_var, get_str_env_var
+
+
+env_path = project_root / ".env"
+load_dotenv(dotenv_path=env_path)
+
+SERVER = get_str_env_var("SERVER")
+EMAIL = get_str_env_var("EMAIL")
+PASSWORD = get_str_env_var("PASSWORD")
+PROJECT_ID = get_int_env_var("PROJECT_ID")
 
 
 def _auth() -> HTTPBasicAuth:
