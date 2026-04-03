@@ -73,6 +73,17 @@ def _put_annotations(task_id: int, payload: dict) -> None:
         )
 
 
+def _confirm_if_no_tracks(task_id: int, track_count: int) -> bool:
+    if track_count > 0:
+        return True
+
+    print("WARNING: No tracks were found for this task.")
+    answer = input(
+        f"Task {task_id}: continue anyway and delete skeleton shapes? [y/N]: "
+    ).strip().lower()
+    return answer in ("y", "yes")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Delete all skeleton shapes while preserving tracks for a CVAT task"
@@ -97,6 +108,10 @@ def main() -> None:
 
     if args.dry_run:
         print("Dry run enabled. No changes were sent to CVAT.")
+        return
+
+    if not _confirm_if_no_tracks(task_id=task_id, track_count=len(updated["tracks"])):
+        print("Cancelled. No changes were sent to CVAT.")
         return
 
     _put_annotations(task_id, updated)
