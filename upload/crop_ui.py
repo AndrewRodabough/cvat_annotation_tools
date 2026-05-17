@@ -53,10 +53,11 @@ def ask_crop_roi(
             scale = max_preview / float(max(src_w, src_h))
 
         current_frame = 0
-        positioned_frame = -1
         playing = False
         crop_display_rect: tuple[int, int, int, int] | None = None
         duration_s = (total_frames - 1) / fps if total_frames > 1 else 0.0
+        last_frame = None
+        last_frame_index = -1
         mouse_state = {
             "dragging": False,
             "seek_requested": False,
@@ -109,15 +110,23 @@ def ask_crop_roi(
         while True:
             current_frame = max(0, min(current_frame, total_frames - 1))
 
-            if positioned_frame != current_frame:
+            frame = None
+            if not playing and last_frame is not None and current_frame == last_frame_index:
+                frame = last_frame.copy()
+            else:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-                positioned_frame = current_frame
-
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                break
-
-            positioned_frame = current_frame + 1 if playing else current_frame
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    if last_frame is None:
+                        break
+                    if current_frame >= total_frames - 1:
+                        playing = False
+                        frame = last_frame.copy()
+                    else:
+                        break
+                else:
+                    last_frame = frame.copy()
+                    last_frame_index = current_frame
 
             if scale < 1.0:
                 disp_w = max(2, int(round(frame.shape[1] * scale)))
@@ -195,15 +204,19 @@ def ask_crop_roi(
             elif key == ord("j"):
                 current_frame -= int(5 * fps)
                 playing = False
+                last_frame_index = -1
             elif key == ord("l"):
                 current_frame += int(5 * fps)
                 playing = False
+                last_frame_index = -1
             elif key == ord(","):
                 current_frame -= 1
                 playing = False
+                last_frame_index = -1
             elif key == ord("."):
                 current_frame += 1
                 playing = False
+                last_frame_index = -1
             elif key == ord("c"):
                 crop_display_rect = None
                 print("Crop cleared")

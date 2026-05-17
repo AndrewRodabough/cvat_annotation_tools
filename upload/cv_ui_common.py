@@ -57,6 +57,16 @@ def time_from_scrubber_x(x: int, duration: float, x0: int, x1: int) -> float:
     return ratio * duration
 
 
+def seekable_duration_seconds(total_frames: int, fps: float, duration_s: float) -> float:
+    if total_frames <= 1 or fps <= 0:
+        return max(0.0, duration_s)
+
+    last_frame_time = (total_frames - 1) / fps
+    if duration_s <= 0:
+        return last_frame_time
+    return min(duration_s, last_frame_time)
+
+
 def draw_scrubber(
     frame,
     now_s: float,

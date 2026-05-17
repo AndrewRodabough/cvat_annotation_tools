@@ -4,7 +4,13 @@ import time
 
 import cv2
 
-from cv_ui_common import draw_scrubber, restore_terminal_after_cv, suppress_stderr, time_from_scrubber_x
+from cv_ui_common import (
+    draw_scrubber,
+    restore_terminal_after_cv,
+    seekable_duration_seconds,
+    suppress_stderr,
+    time_from_scrubber_x,
+)
 from range_selection import finalize_ranges
 
 
@@ -115,10 +121,12 @@ def ask_ranges_preview(
             )
 
         current_frame = 0
-        positioned_frame = -1
         playing = True
         ranges: list[tuple[float, float]] = []
         mark_in: float | None = None
+        seek_duration_s = seekable_duration_seconds(total_frames, fps, duration)
+        last_frame = None
+        last_frame_index = -1
         mouse_state = {
             "dragging": False,
             "seek_requested": False,
@@ -145,16 +153,16 @@ def ask_ranges_preview(
 
             if event == cv2.EVENT_LBUTTONDOWN and in_bar:
                 mouse_state["dragging"] = True
-                mouse_state["seek_seconds"] = time_from_scrubber_x(x, duration, x0, x1)
+                mouse_state["seek_seconds"] = time_from_scrubber_x(x, seek_duration_s, x0, x1)
                 mouse_state["seek_requested"] = True
                 mouse_state["seek_force"] = True
             elif event == cv2.EVENT_MOUSEMOVE and mouse_state["dragging"]:
-                mouse_state["seek_seconds"] = time_from_scrubber_x(x, duration, x0, x1)
+                mouse_state["seek_seconds"] = time_from_scrubber_x(x, seek_duration_s, x0, x1)
                 mouse_state["seek_requested"] = True
                 mouse_state["seek_force"] = False
             elif event == cv2.EVENT_LBUTTONUP:
                 if mouse_state["dragging"]:
-                    mouse_state["seek_seconds"] = time_from_scrubber_x(x, duration, x0, x1)
+                    mouse_state["seek_seconds"] = time_from_scrubber_x(x, seek_duration_s, x0, x1)
                     mouse_state["seek_requested"] = True
                     mouse_state["seek_force"] = True
                 mouse_state["dragging"] = False
@@ -170,15 +178,23 @@ def ask_ranges_preview(
         while True:
             current_frame = max(0, min(current_frame, total_frames - 1))
 
-            if positioned_frame != current_frame:
+            frame = None
+            if not playing and last_frame is not None and current_frame == last_frame_index:
+                frame = last_frame.copy()
+            else:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-                positioned_frame = current_frame
-
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            positioned_frame = current_frame + 1 if playing else current_frame
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    if last_frame is None:
+                        break
+                    if current_frame >= total_frames - 1:
+                        playing = False
+                        frame = last_frame.copy()
+                    else:
+                        break
+                else:
+                    last_frame = frame.copy()
+                    last_frame_index = current_frame
 
             if scale_factor < 1.0:
                 new_width = int(frame.shape[1] * scale_factor)
@@ -201,7 +217,7 @@ def ask_ranges_preview(
             mouse_state["scrubber"] = draw_scrubber(
                 frame,
                 now_s,
-                duration,
+                seek_duration_s,
                 ranges,
                 mark_in,
                 cfg.scrubber_height,
@@ -220,7 +236,7 @@ def ask_ranges_preview(
                     now_ts - mouse_state["last_seek_apply_ts"] >= SCRUB_SEEK_THROTTLE_S
                 )
                 if should_apply_seek:
-                    target_s = max(0.0, min(mouse_state["seek_seconds"], duration))
+                    target_s = max(0.0, min(mouse_state["seek_seconds"], seek_duration_s))
                     current_frame = int(round(target_s * fps))
                     playing = False
                     mouse_state["seek_requested"] = False
@@ -241,15 +257,19 @@ def ask_ranges_preview(
             elif key == ord("j"):
                 current_frame -= int(5 * fps)
                 playing = False
+                last_frame_index = -1
             elif key == ord("l"):
                 current_frame += int(5 * fps)
                 playing = False
+                last_frame_index = -1
             elif key == ord(","):
                 current_frame -= 1
                 playing = False
+                last_frame_index = -1
             elif key == ord("."):
                 current_frame += 1
                 playing = False
+                last_frame_index = -1
             elif key == ord("i"):
                 mark_in = now_s
                 print(f"IN set at {mark_in:.3f}s (frame {int(round(mark_in * fps))})")
