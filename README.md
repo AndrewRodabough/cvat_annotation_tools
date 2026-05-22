@@ -1,22 +1,53 @@
 # CVAT Upload and Auto-Annotation Tools
 
 This repo contains scripts to:
-- Prepare dance videos for CVAT (trim, optional crop/downscale, frame extraction)
-- Upload extracted frames as CVAT tasks
-- Trigger server-side auto-annotation using a mapping file
+- Prepare and upload videos to CVAT (trim, segment, crop, frame)
+- Trigger server-side auto-annotation of tasks
+- Run client-side auto-annotation for unsupported annotation tasks
+- Utilities for automating repetitive annotation tasks
 
 ## Requirements
 
 - Python 3.10+
-- ffmpeg available on PATH
+- ffmpeg on `PATH` (required for trimming/frame extraction)
 - CVAT server running and reachable
-- Python packages:
+- A Python virtual environment (recommended)
+- Python packages (see `requirements.txt`):
+  - python-dotenv
+  - PyYAML
+  - requests
+  - opencv-python
 
+## Installation and setup
+
+### System packages
+
+#### Fedora
 ```bash
-pip install requests python-dotenv opencv-python pyyaml
+sudo dnf install -y ffmpeg python3 python3-virtualenv
 ```
 
-## Environment Setup (.env)
+#### Ubuntu / Debian
+```bash
+sudo apt update
+sudo apt install -y ffmpeg python3 python3-venv
+```
+
+### Clone repository
+```bash
+git clone https://github.com/AndrewRodabough/cvat_annotation_tools.git
+cd cvat_annotation_tools
+```
+
+### Setup Python environment (recommended)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+## Environment (.env)
 
 Create a file named `.env` in the repository root.
 
@@ -26,174 +57,40 @@ Required keys:
 SERVER=http://localhost:8080
 EMAIL=your-cvat-email@example.com
 PASSWORD=your-cvat-password
-PROJECT_ID=4
 ```
 
-Optional key:
+Optional keys:
 
 ```env
-# auto (default), none, or a specific ffmpeg hwaccel mode (cuda, qsv, vaapi, ...)
-CVAT_FFMPEG_HWACCEL=auto
+PROJECT_ID=1               # default cvat project id
+CVAT_FFMPEG_HWACCEL=auto   # auto, none, or specific hwaccel (cuda, qsv, vaapi, ...)
 ```
 
-What each key does:
-- `SERVER`: Base URL for CVAT API requests.
-- `EMAIL`: CVAT login email.
-- `PASSWORD`: CVAT login password.
-- `PROJECT_ID`: Default CVAT project ID used when creating tasks.
-- `CVAT_FFMPEG_HWACCEL`: Controls ffmpeg decode acceleration during frame extraction.
+## Usage
 
-## Config File
+Quick examples — see the full guides in `docs/` for details.
 
-Runtime behavior for the prep/upload tool is controlled by [upload/config.yaml](upload/config.yaml).
-
-This includes:
-- Target annotation FPS
-- Segment size and overlap
-- Video picker extensions
-- Preview/scrubber UI tuning values
-
-## Using annotation/annotation_mapping.py
-
-Script: [annotation/annotation_mapping.py](annotation/annotation_mapping.py)
-
-Purpose:
-- Sends a CVAT lambda request to run an auto-annotation model on an existing task.
-- Translates model keypoints to your task skeleton keypoints using a mapping JSON.
-
-### Mapping file format
-
-Mapping files live in [annotation/mapping](annotation/mapping).
-Examples:
-- [annotation/mapping/spine_pose_mapping.json](annotation/mapping/spine_pose_mapping.json)
-- [annotation/mapping/hrnet_mapping.json](annotation/mapping/hrnet_mapping.json)
-
-Structure:
-
-```json
-{
-  "metadata": {
-    "name": "model-function-name-on-cvat"
-  },
-  "data": {
-    "body": {
-      "<model_point_id>": "<task_point_id>"
-    }
-  }
-}
-```
-
-Notes:
-- `metadata.name` becomes the `function` sent to `/api/lambda/requests`.
-- `data` can contain groups like `body`, `hands`, `feet`, `face`.
-- Relative mapping names are resolved from `annotation/mapping/`.
-
-### Run it
-
-From repo root:
+- Prepare, trim and upload clips (interactive):
 
 ```bash
-python annotation/annotation_mapping.py --task-id 123 --mapping-file spine_pose_mapping.json
+python3 upload/prep_and_upload_tool.py
 ```
 
-Or with an absolute path:
+- Trigger a CVAT lambda auto-annotation using a mapping file:
 
 ```bash
-python annotation/annotation_mapping.py --task-id 123 --mapping-file /full/path/to/mapping.json
+python3 annotation/annotation_mapping.py --task-id 123 --mapping-file spine_pose_mapping.json
 ```
 
-Expected result:
-- If accepted, CVAT returns success (HTTP 200/201/202) and auto-annotation starts asynchronously.
-
-## Using annotation/annotate_bbox_tracks_with_vitpose.py
-
-Script: [annotation/annotate_bbox_tracks_with_vitpose.py](annotation/annotate_bbox_tracks_with_vitpose.py)
-
-Purpose:
-- Reads an existing CVAT task.
-- Collects rectangle/bbox shapes and tracks frame by frame.
-- Calls the deployed ViTPose Nuclio function once per bbox region.
-- Maps the returned keypoints to your task skeleton labels.
-- Writes the generated skeleton annotations back to the same task.
-
-Example:
+- Annotate existing bbox tracks with a remote ViTPose function:
 
 ```bash
-python annotation/annotate_bbox_tracks_with_vitpose.py \
+python3 annotation/annotate_bbox_tracks_with_vitpose.py \
   --task-id 123 \
-  --mapping-file spine_pose_mapping.json \
+  --mapping-file vitpose_plus_plus_wholebody_numeric_mapping.json \
   --function-url http://<nuclio-host>/api/pth-vitpose-plus-plus-wholebody
 ```
 
-Notes:
-- The script tries a few common CVAT frame-download URL patterns by default.
-- If your deployment exposes frames differently, pass one or more `--frame-url-template` values.
-- If frame download from CVAT is not available, point `--frame-dir` at a local export directory as a fallback.
-- Use `--replace-existing-skeletons` if you want reruns to replace previously generated skeleton shapes instead of appending.
+See the detailed usage guide and configuration reference:
 
-## Using upload/prep_and_upload_tool.py
-
-Script: [upload/prep_and_upload_tool.py](upload/prep_and_upload_tool.py)
-
-Purpose:
-- Interactive desktop workflow for preparing videos and uploading clips to CVAT tasks.
-
-### What it does
-
-For each selected source video, it:
-1. Opens an interactive range picker (OpenCV window) to mark keep ranges.
-2. Optionally prompts for extraction resolution (for large sources).
-3. Optionally prompts for crop ROI.
-4. Trims selected ranges into clips with ffmpeg.
-5. Extracts frames with ffmpeg/OpenCV fallback.
-6. Creates CVAT tasks and uploads frames.
-7. Prints task IDs in the final summary.
-
-### Run it
-
-From repo root:
-
-```bash
-python upload/prep_and_upload_tool.py
-```
-
-The script opens a file picker for one or more videos.
-
-### Interactive controls (range picker)
-
-- `space`: play/pause
-- `j` / `l`: jump -/+ 5 seconds
-- `,` / `.`: previous/next frame
-- `i`: set range start (IN)
-- `o`: set range end (OUT) and add range
-- `d`: remove last range
-- `c`: clear all ranges
-- `Enter`: accept ranges
-- `q` or `Esc`: skip current video
-
-### Output behavior
-
-- Each trimmed clip becomes a CVAT task under `PROJECT_ID`.
-- Upload results are printed as success/failure.
-- On success, each clip prints its `task_id`.
-
-## Typical Workflow
-
-1. Fill out `.env`.
-2. Run prep/upload:
-
-```bash
-python upload/prep_and_upload_tool.py
-```
-
-3. Collect `task_id` values from output.
-4. Trigger auto-annotation per task:
-
-```bash
-python annotation/annotation_mapping.py --task-id <TASK_ID> --mapping-file spine_pose_mapping.json
-```
-
-## Security Notes
-
-- `.env` is ignored by git in [.gitignore](.gitignore).
-- Keep credentials only in `.env`, never hardcoded in scripts.
+- [Usage Guide](docs/usage.md)
