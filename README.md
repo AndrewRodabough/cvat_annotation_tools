@@ -92,5 +92,4 @@ python3 annotation/annotate_bbox_tracks_with_vitpose.py \
 ```
 
 See the detailed usage guide and configuration reference:
-
-- [Usage Guide](docs/usage.md)
+### [Full Usage Guide](docs/usage.md)
