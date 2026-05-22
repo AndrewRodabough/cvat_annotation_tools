@@ -1,1 +1,1 @@
-SKELETON_LABEL: "Person"  # The label in CVAT that corresponds to the skeleton you want annotated
+SKELETON_LABEL: "skeleton"  # The label in CVAT that corresponds to the skeleton you want annotated

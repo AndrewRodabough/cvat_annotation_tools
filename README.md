@@ -105,6 +105,32 @@ python annotation/annotation_mapping.py --task-id 123 --mapping-file /full/path/
 Expected result:
 - If accepted, CVAT returns success (HTTP 200/201/202) and auto-annotation starts asynchronously.
 
+## Using annotation/annotate_bbox_tracks_with_vitpose.py
+
+Script: [annotation/annotate_bbox_tracks_with_vitpose.py](annotation/annotate_bbox_tracks_with_vitpose.py)
+
+Purpose:
+- Reads an existing CVAT task.
+- Collects rectangle/bbox shapes and tracks frame by frame.
+- Calls the deployed ViTPose Nuclio function once per bbox region.
+- Maps the returned keypoints to your task skeleton labels.
+- Writes the generated skeleton annotations back to the same task.
+
+Example:
+
+```bash
+python annotation/annotate_bbox_tracks_with_vitpose.py \
+  --task-id 123 \
+  --mapping-file spine_pose_mapping.json \
+  --function-url http://<nuclio-host>/api/pth-vitpose-plus-plus-wholebody
+```
+
+Notes:
+- The script tries a few common CVAT frame-download URL patterns by default.
+- If your deployment exposes frames differently, pass one or more `--frame-url-template` values.
+- If frame download from CVAT is not available, point `--frame-dir` at a local export directory as a fallback.
+- Use `--replace-existing-skeletons` if you want reruns to replace previously generated skeleton shapes instead of appending.
+
 ## Using upload/prep_and_upload_tool.py
 
 Script: [upload/prep_and_upload_tool.py](upload/prep_and_upload_tool.py)
