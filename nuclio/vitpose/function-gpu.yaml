@@ -1,0 +1,193 @@
+metadata:
+  name: pth-vitpose-plus-plus-wholebody
+  namespace: cvat
+  annotations:
+    name: ViTPose++ WholeBody
+    type: detector
+    framework: pytorch
+    description: ViTPose++ wholebody with 133 keypoints (Body, Foot, Face, Hands)
+    spec: |
+      [
+        {
+          "name": "body",
+          "type": "skeleton",
+          "svg": "",
+          "sublabels": [
+            {"id": 0, "name": "1", "type": "points"},
+            {"id": 1, "name": "left_eye", "type": "points"},
+            {"id": 2, "name": "right_eye", "type": "points"},
+            {"id": 3, "name": "2", "type": "points"},
+            {"id": 4, "name": "3", "type": "points"},
+            {"id": 5, "name": "8", "type": "points"},
+            {"id": 6, "name": "11", "type": "points"},
+            {"id": 7, "name": "7", "type": "points"},
+            {"id": 8, "name": "10", "type": "points"},
+            {"id": 9, "name": "6", "type": "points"},
+            {"id": 10, "name": "9", "type": "points"},
+            {"id": 11, "name": "15", "type": "points"},
+            {"id": 12, "name": "18", "type": "points"},
+            {"id": 13, "name": "16", "type": "points"},
+            {"id": 14, "name": "19", "type": "points"},
+            {"id": 15, "name": "17", "type": "points"},
+            {"id": 16, "name": "20", "type": "points"},
+            {"id": 17, "name": "21", "type": "points"},
+            {"id": 18, "name": "22", "type": "points"},
+            {"id": 19, "name": "23", "type": "points"},
+            {"id": 20, "name": "25", "type": "points"},
+            {"id": 21, "name": "26", "type": "points"},
+            {"id": 22, "name": "27", "type": "points"},
+            {"id": 23, "name": "face_0", "type": "points"},
+            {"id": 24, "name": "face_1", "type": "points"},
+            {"id": 25, "name": "face_2", "type": "points"},
+            {"id": 26, "name": "face_3", "type": "points"},
+            {"id": 27, "name": "face_4", "type": "points"},
+            {"id": 28, "name": "face_5", "type": "points"},
+            {"id": 29, "name": "face_6", "type": "points"},
+            {"id": 30, "name": "face_7", "type": "points"},
+            {"id": 31, "name": "face_8", "type": "points"},
+            {"id": 32, "name": "face_9", "type": "points"},
+            {"id": 33, "name": "face_10", "type": "points"},
+            {"id": 34, "name": "face_11", "type": "points"},
+            {"id": 35, "name": "face_12", "type": "points"},
+            {"id": 36, "name": "face_13", "type": "points"},
+            {"id": 37, "name": "face_14", "type": "points"},
+            {"id": 38, "name": "face_15", "type": "points"},
+            {"id": 39, "name": "face_16", "type": "points"},
+            {"id": 40, "name": "face_17", "type": "points"},
+            {"id": 41, "name": "face_18", "type": "points"},
+            {"id": 42, "name": "face_19", "type": "points"},
+            {"id": 43, "name": "face_20", "type": "points"},
+            {"id": 44, "name": "face_21", "type": "points"},
+            {"id": 45, "name": "face_22", "type": "points"},
+            {"id": 46, "name": "face_23", "type": "points"},
+            {"id": 47, "name": "face_24", "type": "points"},
+            {"id": 48, "name": "face_25", "type": "points"},
+            {"id": 49, "name": "face_26", "type": "points"},
+            {"id": 50, "name": "face_27", "type": "points"},
+            {"id": 51, "name": "face_28", "type": "points"},
+            {"id": 52, "name": "face_29", "type": "points"},
+            {"id": 53, "name": "face_30", "type": "points"},
+            {"id": 54, "name": "face_31", "type": "points"},
+            {"id": 55, "name": "face_32", "type": "points"},
+            {"id": 56, "name": "face_33", "type": "points"},
+            {"id": 57, "name": "face_34", "type": "points"},
+            {"id": 58, "name": "face_35", "type": "points"},
+            {"id": 59, "name": "face_36", "type": "points"},
+            {"id": 60, "name": "face_37", "type": "points"},
+            {"id": 61, "name": "face_38", "type": "points"},
+            {"id": 62, "name": "face_39", "type": "points"},
+            {"id": 63, "name": "face_40", "type": "points"},
+            {"id": 64, "name": "face_41", "type": "points"},
+            {"id": 65, "name": "face_42", "type": "points"},
+            {"id": 66, "name": "face_43", "type": "points"},
+            {"id": 67, "name": "face_44", "type": "points"},
+            {"id": 68, "name": "face_45", "type": "points"},
+            {"id": 69, "name": "face_46", "type": "points"},
+            {"id": 70, "name": "face_47", "type": "points"},
+            {"id": 71, "name": "face_48", "type": "points"},
+            {"id": 72, "name": "face_49", "type": "points"},
+            {"id": 73, "name": "face_50", "type": "points"},
+            {"id": 74, "name": "face_51", "type": "points"},
+            {"id": 75, "name": "face_52", "type": "points"},
+            {"id": 76, "name": "face_53", "type": "points"},
+            {"id": 77, "name": "face_54", "type": "points"},
+            {"id": 78, "name": "face_55", "type": "points"},
+            {"id": 79, "name": "face_56", "type": "points"},
+            {"id": 80, "name": "face_57", "type": "points"},
+            {"id": 81, "name": "face_58", "type": "points"},
+            {"id": 82, "name": "face_59", "type": "points"},
+            {"id": 83, "name": "face_60", "type": "points"},
+            {"id": 84, "name": "face_61", "type": "points"},
+            {"id": 85, "name": "face_62", "type": "points"},
+            {"id": 86, "name": "face_63", "type": "points"},
+            {"id": 87, "name": "face_64", "type": "points"},
+            {"id": 88, "name": "face_65", "type": "points"},
+            {"id": 89, "name": "face_66", "type": "points"},
+            {"id": 90, "name": "face_67", "type": "points"},
+            {"id": 91, "name": "left_hand_root", "type": "points"},
+            {"id": 92, "name": "left_thumb1", "type": "points"},
+            {"id": 93, "name": "left_thumb2", "type": "points"},
+            {"id": 94, "name": "left_thumb3", "type": "points"},
+            {"id": 95, "name": "left_thumb4", "type": "points"},
+            {"id": 96, "name": "left_index1", "type": "points"},
+            {"id": 97, "name": "left_index2", "type": "points"},
+            {"id": 98, "name": "left_index3", "type": "points"},
+            {"id": 99, "name": "left_index4", "type": "points"},
+            {"id": 100, "name": "left_middle1", "type": "points"},
+            {"id": 101, "name": "left_middle2", "type": "points"},
+            {"id": 102, "name": "left_middle3", "type": "points"},
+            {"id": 103, "name": "left_middle4", "type": "points"},
+            {"id": 104, "name": "left_ring1", "type": "points"},
+            {"id": 105, "name": "left_ring2", "type": "points"},
+            {"id": 106, "name": "left_ring3", "type": "points"},
+            {"id": 107, "name": "left_ring4", "type": "points"},
+            {"id": 108, "name": "left_pinky1", "type": "points"},
+            {"id": 109, "name": "left_pinky2", "type": "points"},
+            {"id": 110, "name": "left_pinky3", "type": "points"},
+            {"id": 111, "name": "left_pinky4", "type": "points"},
+            {"id": 112, "name": "right_hand_root", "type": "points"},
+            {"id": 113, "name": "right_thumb1", "type": "points"},
+            {"id": 114, "name": "right_thumb2", "type": "points"},
+            {"id": 115, "name": "right_thumb3", "type": "points"},
+            {"id": 116, "name": "right_thumb4", "type": "points"},
+            {"id": 117, "name": "right_index1", "type": "points"},
+            {"id": 118, "name": "right_index2", "type": "points"},
+            {"id": 119, "name": "right_index3", "type": "points"},
+            {"id": 120, "name": "right_index4", "type": "points"},
+            {"id": 121, "name": "right_middle1", "type": "points"},
+            {"id": 122, "name": "right_middle2", "type": "points"},
+            {"id": 123, "name": "right_middle3", "type": "points"},
+            {"id": 124, "name": "right_middle4", "type": "points"},
+            {"id": 125, "name": "right_ring1", "type": "points"},
+            {"id": 126, "name": "right_ring2", "type": "points"},
+            {"id": 127, "name": "right_ring3", "type": "points"},
+            {"id": 128, "name": "right_ring4", "type": "points"},
+            {"id": 129, "name": "right_pinky1", "type": "points"},
+            {"id": 130, "name": "right_pinky2", "type": "points"},
+            {"id": 131, "name": "right_pinky3", "type": "points"},
+            {"id": 132, "name": "right_pinky4", "type": "points"}
+          ]
+        }
+      ]
+
+spec:
+  description: ViTPose++ wholebody with 133 keypoints
+  handler: main:handler
+  runtime: python:3.10
+  platform:
+    attributes:
+      network: cvat_cvat
+  build:
+    image: cvat.pth.vitpose.plus.plus.wholebody
+    baseImage: pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
+    directives:
+      preCopy:
+        - kind: RUN
+          value: DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y libgl1-mesa-glx libglib2.0-0 git build-essential && rm -rf /var/lib/apt/lists/*
+        - kind: RUN
+          value: pip install --no-cache-dir setuptools==69.5.1 timm==0.4.9 einops opencv-python-headless "numpy<2"
+        - kind: RUN
+          value: |
+            git clone https://github.com/open-mmlab/mmcv.git /opt/nuclio/mmcv && \
+            cd /opt/nuclio/mmcv && git checkout v1.3.9 && \
+            MMCV_WITH_OPS=1 pip install -e .
+        - kind: RUN
+          value: |
+            git clone https://github.com/ViTAE-Transformer/ViTPose.git /opt/nuclio/ViTPose && \
+            cd /opt/nuclio/ViTPose && pip install -v -e .
+      postCopy:
+        - kind: RUN
+          value: pip install "numpy<2"
+  triggers:
+    myHttpTrigger:
+      kind: http
+      maxWorkers: 1
+      workerAvailabilityTimeoutMilliseconds: 10000
+      attributes:
+        maxRequestBodySize: 33554432
+  platform:
+    attributes:
+      network: cvat_cvat
+      restartPolicy:
+        name: always
+        maximumRetryCount: 3

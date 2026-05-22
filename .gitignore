@@ -10,3 +10,5 @@ build/
 .coverage
 temp.py
 cvat_frames_*
+exports/annotation_files/
+*.pth

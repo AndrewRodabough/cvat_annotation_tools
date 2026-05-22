@@ -10,7 +10,7 @@ This repo contains scripts to:
 
 - Python 3.10+
 - ffmpeg on `PATH` (required for trimming/frame extraction)
-- CVAT server running and reachable
+- CVAT server running and reachable (project has been tested on v2.65.0 only)
 - A Python virtual environment (recommended)
 - Python packages (see `requirements.txt`):
   - python-dotenv
