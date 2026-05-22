@@ -43,14 +43,14 @@ for annotations beyond cvat's capabilities
 (ie. running pose estimation on annotated bbox rather than per frame)
 
 ```bash
-python3 ./run/manual_annotation_by_bbox.py 
+python3 ./run/local_annotation_by_bbox.py 
 
 # Required Arguments
 --task-id <int>         # id of task to annotate
 --mapping-file <path>   # file that defines mapping between model and cvat
---function_url <url>    # url where nuclio function is hosted
 
 # Optional Arguments
+--function_url <url>    # api url for nuclio function (if not local)
 --project-id <int>      # override default project id from .env
 --dry-run               # returns results rather than trying to upload them
 --replace-existing      # replaces all existing annotation

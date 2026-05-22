@@ -1,0 +1,47 @@
+metadata:
+  name: pth-spinetrack-spinepose-v2
+  namespace: nuclio
+  annotations:
+    name: SpinePose-v2
+    type: detector
+    framework: pytorch
+    description: Spine pose estimation from full-body tracking for biomechanical dance analysis
+    spec: |
+      [
+        {
+          "name": "body",
+          "type": "skeleton",
+          "attributes": [],
+          "svg": "<line x1='C7' y1='C7' x2='T6' y2='T6' stroke='yellow' stroke-width='2' /> <line x1='T6' y1='T6' x2='T10' y2='T10' stroke='yellow' stroke-width='2' /> <line x1='T10' y1='T10' x2='L5' y2='L5' stroke='yellow' stroke-width='2' />",
+          "sublabels": [
+            { "id": 0, "name": "C7", "type": "points", "attributes": [] },
+            { "id": 1, "name": "T6", "type": "points", "attributes": [] },
+            { "id": 2, "name": "T10", "type": "points", "attributes": [] },
+            { "id": 3, "name": "L5", "type": "points", "attributes": [] }
+          ]
+        }
+      ]
+
+spec:
+  handler: main:handler
+  runtime: python:3.10
+  image: cvat.pth.spinetrack.spinepose:latest
+
+  resources:
+    requests:
+      cpu: "25m"
+      memory: "1Mi"
+
+  build:
+    image: cvat.pth.spinetrack.spinepose
+    baseImage: pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+    directives:
+      preCopy:
+        - kind: RUN
+          value: apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 libxcb1 libx11-6 && rm -rf /var/lib/apt/lists/*
+        - kind: RUN
+          value: pip install spinepose opencv-python-headless numpy
+
+  platform:
+    attributes:
+      network: cvat_cvat

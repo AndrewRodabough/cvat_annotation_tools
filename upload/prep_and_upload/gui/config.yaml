@@ -1,8 +1,7 @@
 VIDEO_EXTENSIONS:
-  - ["Video files", "*.mp4 *.mov *.avi *.mkv *.m4v *.wmv"]
+  - ["Video files", "*.mp4 *.mov *.avi *.mkv *.m4v *.wmv *.MOV"]
   - ["All files", "*.*"]
-TARGET_ANNOTATION_FPS: 7.5
-SEGMENT_SIZE: 500
+SEGMENT_SIZE: 400
 SEGMENT_OVERLAP: 3
 FAST_EXTRACT_MAX_DIMENSION: 1920
 UPLOAD_BATCH_SIZE: 100

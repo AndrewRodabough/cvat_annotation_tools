@@ -1,6 +1,7 @@
 {
     "metadata": {
-        "name": "pth-mmpose-hrnet32"
+        "input_format": "hrnet_coco_wholebody",
+        "output_format": "ballroom_48"
     },
 
     "data": {

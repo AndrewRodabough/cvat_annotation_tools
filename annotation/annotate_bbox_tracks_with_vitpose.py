@@ -17,7 +17,9 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from utils.get_env import get_str_env_var
+from utils.get_nuclio_function_port import get_nuclio_function_port
 from utils.yaml_parse import need
+from utils.load_mapping import load_mapping
 
 env_path = project_root / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -25,7 +27,6 @@ load_dotenv(dotenv_path=env_path)
 SERVER = get_str_env_var("SERVER").rstrip("/")
 EMAIL = get_str_env_var("EMAIL")
 PASSWORD = get_str_env_var("PASSWORD")
-MAPPING_FILE_FOLDER = project_root / "annotation" / "mapping"
 CONFIG_PATH = project_root / "annotation" / "config.yaml"
 
 with CONFIG_PATH.open("r", encoding="utf-8") as f:
@@ -54,36 +55,25 @@ def _parse_task_ids(raw_values: list[str]) -> list[int]:
     return task_ids
 
 
-def _load_mapping(mapping_file: str) -> tuple[str, dict[str, str], str]:
-    mapping_path = Path(mapping_file)
-    candidate_paths = [mapping_path]
-    if not mapping_path.is_absolute():
-        candidate_paths.append(project_root / mapping_file)
-        candidate_paths.append(MAPPING_FILE_FOLDER / mapping_path.name)
-
-    for candidate_path in candidate_paths:
-        if candidate_path.exists():
-            mapping_path = candidate_path
-            break
-    else:
-        raise FileNotFoundError(f"Mapping file not found: {mapping_file}")
-
-    with mapping_path.open("r", encoding="utf-8") as f:
-        raw_mapping = json.load(f)
-
-    metadata = raw_mapping.get("metadata", {})
-    function_name = metadata.get("name")
-    if not function_name:
-        raise ValueError(f"Mapping file is missing metadata.name: {mapping_path}")
-
-    data = raw_mapping.get("data", {})
-    model_to_task: dict[str, str] = {}
-    for _, sublabels in data.items():
+def _collapse_mapping_data(data: dict[str, dict[str, str]]) -> dict[str, str]:
+    collapsed: dict[str, str] = {}
+    for sublabels in data.values():
         for model_idx, task_idx in sublabels.items():
-            model_to_task[str(model_idx)] = str(task_idx)
+            collapsed[str(model_idx)] = str(task_idx)
+    return collapsed
 
-    return function_name, model_to_task, str(mapping_path)
 
+def _resolve_function_url(function_name: str, explicit_url: str | None) -> str:
+    if explicit_url:
+        return explicit_url.rstrip("/")
+
+    port = get_nuclio_function_port(function_name)
+    if port is None:
+        raise RuntimeError(
+            f"Could not determine Nuclio port for function {function_name!r}; pass --function-url or set NUCLIO_FUNCTION_URL"
+        )
+
+    return f"http://localhost:{port}/api/{function_name}"
 
 def _strip_ids(value: Any) -> Any:
     if isinstance(value, dict):
@@ -350,6 +340,20 @@ def _call_vitpose(function_url: str, image_bytes: bytes, regions: list[dict[str,
     raise RuntimeError(f"Unexpected ViTPose response shape: {body}")
 
 
+def _bbox_center(points: list[float]) -> tuple[float, float]:
+    if len(points) < 4:
+        return 0.0, 0.0
+    x1, y1, x2, y2 = points[0], points[1], points[2], points[3]
+    return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+
+def _numeric_label_sort_key(value: str) -> tuple[int, int | str]:
+    try:
+        return (0, int(value))
+    except ValueError:
+        return (1, value)
+
+
 def _prediction_to_shape(
     prediction: dict[str, Any],
     task_label_id_lookup: dict[str, int],
@@ -357,6 +361,9 @@ def _prediction_to_shape(
     frame: int,
     track_id: int | None,
     fallback_skeleton_label: str,
+    required_point_labels: list[str],
+    fill_missing_points: bool,
+    center_point: tuple[float, float],
 ) -> dict[str, Any]:
     skeleton_label_id = _ensure_label_id(fallback_skeleton_label, task_label_id_lookup)
     if skeleton_label_id is None:
@@ -379,10 +386,14 @@ def _prediction_to_shape(
         skeleton["label_id"] = skeleton_label_id
 
     elements: list[dict[str, Any]] = []
+    elements_by_label: dict[str, dict[str, Any]] = {}
     for element in prediction.get("elements", []) or []:
         label_name = str(element.get("label", ""))
         mapped_label = model_to_task_point.get(label_name)
         if mapped_label is None:
+            continue
+
+        if mapped_label == "-1":
             continue
 
         label_id = _ensure_label_id(mapped_label, task_label_id_lookup)
@@ -403,6 +414,29 @@ def _prediction_to_shape(
         }
         kp["label_id"] = label_id
         elements.append(kp)
+        elements_by_label[mapped_label] = kp
+
+    if fill_missing_points:
+        for label in required_point_labels:
+            if label in elements_by_label:
+                continue
+            label_id = _ensure_label_id(label, task_label_id_lookup)
+            if label_id is None:
+                continue
+            missing_kp: dict[str, Any] = {
+                "type": "points",
+                "label": label,
+                "frame": frame,
+                "points": [float(center_point[0]), float(center_point[1])],
+                "outside": True,
+                "occluded": False,
+                "attributes": [],
+                "label_id": label_id,
+            }
+            elements.append(missing_kp)
+            elements_by_label[label] = missing_kp
+
+    elements.sort(key=lambda item: _numeric_label_sort_key(str(item.get("label", ""))))
 
     skeleton["elements"] = elements
     return skeleton
@@ -456,15 +490,18 @@ def _sanitize_no_unintended_deletions(
 def _run_task(
     task_id: int,
     mapping_file: str,
-    function_url: str,
+    function_url: str | None,
     frame_url_templates: list[str],
     fallback_frame_dir: str | None,
     replace_existing_skeletons: bool,
     remove_bboxes: bool,
     remove_tracks: bool,
     dry_run: bool,
+    fill_missing_points: bool,
 ) -> None:
-    function_name, model_to_task_point, mapping_path = _load_mapping(mapping_file)
+    function_name, mapping_data, mapping_path, _raw = load_mapping(mapping_file)
+    function_url = _resolve_function_url(function_name, function_url)
+    model_to_task_point = _collapse_mapping_data(mapping_data)
     task_info = _fetch_task(task_id)
     task_label_id_lookup = _resolve_task_labels(task_info)
     annotations = _fetch_annotations(task_id)
@@ -480,6 +517,12 @@ def _run_task(
     print(f"  remove_bboxes: {remove_bboxes}")
     print(f"  remove_tracks: {remove_tracks}")
 
+    required_point_labels = [str(i) for i in range(1, 29)]
+    mapped_task_labels = set(model_to_task_point.values())
+    missing_required = [label for label in required_point_labels if label not in mapped_task_labels]
+    if missing_required:
+        print(f"  mapping missing required labels (will fill at center): {', '.join(missing_required)}")
+
     generated_shapes: list[dict[str, Any]] = []
     for frame in sorted(grouped_regions):
         frame_bytes = _download_frame_bytes(
@@ -492,6 +535,7 @@ def _run_task(
         _decode_image(frame_bytes)
 
         for region in grouped_regions[frame]:
+            center_point = _bbox_center(region["points"])
             predictions = _call_vitpose(
                 function_url=function_url,
                 image_bytes=frame_bytes,
@@ -508,6 +552,9 @@ def _run_task(
                         frame=frame,
                         track_id=region.get("track_id"),
                         fallback_skeleton_label=SKELETON_LABEL,
+                        required_point_labels=required_point_labels,
+                        fill_missing_points=fill_missing_points,
+                        center_point=center_point,
                     )
                 )
 
@@ -581,7 +628,7 @@ def main() -> None:
         "--function-url",
         type=str,
         default=os.getenv("NUCLIO_FUNCTION_URL", ""),
-        help="HTTP URL of the deployed Nuclio function",
+        help="HTTP URL of the deployed Nuclio function; if omitted, derive it from the Nuclio port and mapping function name",
     )
     parser.add_argument(
         "--frame-url-template",
@@ -615,6 +662,11 @@ def main() -> None:
         action="store_true",
         help="Process frames and print counts without updating CVAT",
     )
+    parser.add_argument(
+        "--no-fill-missing-points",
+        action="store_true",
+        help="Disable filling labels 1-28 at the bbox center (enabled by default)",
+    )
 
     args = parser.parse_args()
 
@@ -623,9 +675,6 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
-    if not args.function_url:
-        parser.error("--function-url is required, or set NUCLIO_FUNCTION_URL in the environment")
-
     frame_url_templates = args.frame_url_template or [
         f"{SERVER}/api/tasks/{{task_id}}/data?type=frame&number={{frame}}",
         f"{SERVER}/api/tasks/{{task_id}}/data?frame={{frame}}",
@@ -633,6 +682,7 @@ def main() -> None:
     ]
 
     for task_id in task_ids:
+        fill_missing_points = not args.no_fill_missing_points
         _run_task(
             task_id=task_id,
             mapping_file=args.mapping_file,
@@ -643,6 +693,7 @@ def main() -> None:
             remove_bboxes=args.remove_bboxes,
             remove_tracks=args.remove_tracks,
             dry_run=args.dry_run,
+            fill_missing_points=fill_missing_points,
         )
 
 

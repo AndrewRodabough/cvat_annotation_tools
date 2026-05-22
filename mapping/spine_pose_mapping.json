@@ -1,6 +1,7 @@
 {
     "metadata": {
-        "name": "pth-spinetrack-spinepose-v2"
+        "input_format": "spinepose_wholebody",
+        "output_format": "ballroom_48"
     },
 
     "data": {

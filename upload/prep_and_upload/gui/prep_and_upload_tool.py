@@ -9,16 +9,15 @@ from pathlib import Path
 import sys
 import yaml
 
-from upload_clip import upload_clip
-from clip_trimming import make_clips_from_ranges
-from crop_ui import CropUiConfig, ask_crop_roi
-from cv_ui_common import restore_terminal_after_cv
-from range_selection import ask_ranges_text, print_ranges
-from range_preview_ui import PreviewUiConfig, ask_ranges_preview
-from terminal_state import initialize_terminal_state_restore, restore_terminal_state
+from upload.clip_trimming import make_clips_from_ranges
+from upload.range_selection import ask_ranges_text, print_ranges
+from upload.terminal_state import initialize_terminal_state_restore, restore_terminal_state
+from upload.upload_clip import upload_clip
+from upload.prep_and_upload.gui.crop_ui import CropUiConfig, ask_crop_roi
+from upload.prep_and_upload.gui.cv_ui_common import restore_terminal_after_cv
+from upload.prep_and_upload.gui.range_preview_ui import PreviewUiConfig, ask_ranges_preview
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+project_root = Path(__file__).resolve().parents[3]
 
 from utils.get_env import get_int_env_var
 from utils.yaml_parse import need
@@ -28,7 +27,7 @@ env_path = project_root / ".env"
 load_dotenv(dotenv_path=env_path)
 
 PROJECT_ID = get_int_env_var("PROJECT_ID")
-CONFIG_PATH = project_root / "upload" / "config.yaml"
+CONFIG_PATH = Path(__file__).resolve().with_name("config.yaml")
 
 with CONFIG_PATH.open("r", encoding="utf-8") as f:
     cfg = yaml.safe_load(f) or {}
@@ -170,6 +169,7 @@ def _upload_clip_with_result_lock(
     clip_path: str,
     extraction_max_dimension: int | None,
     extraction_crop_rect: tuple[int, int, int, int] | None,
+    project_id: int,
     results_lock: threading.Lock,
     upload_results: list[dict],
 ) -> None:
@@ -177,7 +177,7 @@ def _upload_clip_with_result_lock(
         clip_path,
         max_dimension=extraction_max_dimension,
         crop_rect=extraction_crop_rect,
-        project_id=PROJECT_ID,
+        project_id=project_id,
     )
     with results_lock:
         upload_results.append(result)
@@ -192,6 +192,7 @@ def _process_video_and_queue_uploads(
     index: int,
     total_videos: int,
     temp_clips_root: str,
+    project_id: int,
     executor: ThreadPoolExecutor,
     futures: list[Future],
     upload_results: list[dict],
@@ -230,6 +231,7 @@ def _process_video_and_queue_uploads(
                     clip_path,
                     clip_max_dimension,
                     clip_crop_rect,
+                    project_id,
                     results_lock,
                     upload_results,
                 )
@@ -285,7 +287,8 @@ def _print_final_summary(
                 if "frames_dir" in result:
                     print(f"  Frames: {result['frames_dir']}")
 
-def main() -> None:
+def main(project_id: int | None = None) -> None:
+    resolved_project_id = PROJECT_ID if project_id is None else project_id
     temp_clips_root = tempfile.mkdtemp(prefix="cvat_trimmed_clips_")
     try:
         videos = choose_videos()
@@ -293,7 +296,7 @@ def main() -> None:
             print("No videos selected. Exiting.")
             return
 
-        print(f"Selected {len(videos)} source videos. Project ID={PROJECT_ID}")
+        print(f"Selected {len(videos)} source videos. Project ID={resolved_project_id}")
 
         # ============================================================================
         # PHASE 1 & 2: ANNOTATION + ASYNC PROCESSING
@@ -319,6 +322,7 @@ def main() -> None:
                     index=i,
                     total_videos=len(videos),
                     temp_clips_root=temp_clips_root,
+                    project_id=resolved_project_id,
                     executor=executor,
                     futures=futures,
                     upload_results=upload_results,

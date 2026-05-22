@@ -1,27 +1,29 @@
-from pathlib import Path
-import sys
-import tempfile
 import shutil
+from pathlib import Path
+import tempfile
 import yaml
 
 project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 from utils.get_env import get_int_env_var
 from utils.video_data import get_video_fps, get_video_dimensions, video_duration_seconds
 from utils.yaml_parse import need
 
-from to_frames import video_to_frames
-from upload_videos import process_video_frames_for_upload
+from upload.to_frames import video_to_frames
+from upload.upload_videos import process_video_frames_for_upload
 
-CONFIG_PATH = project_root / "upload" / "config.yaml"
+WORKFLOW_CONFIG_PATH = project_root / "upload" / "prep_and_upload" / "config.yaml"
+GUI_CONFIG_PATH = project_root / "upload" / "prep_and_upload" / "gui" / "config.yaml"
 
-with CONFIG_PATH.open("r", encoding="utf-8") as f:
-    cfg = yaml.safe_load(f) or {}
+with WORKFLOW_CONFIG_PATH.open("r", encoding="utf-8") as f:
+    workflow_cfg = yaml.safe_load(f) or {}
 
-TARGET_ANNOTATION_FPS = int(need("TARGET_ANNOTATION_FPS", cfg))
-SEGMENT_SIZE = int(need("SEGMENT_SIZE", cfg))
-SEGMENT_OVERLAP = int(need("SEGMENT_OVERLAP", cfg))
+with GUI_CONFIG_PATH.open("r", encoding="utf-8") as f:
+    gui_cfg = yaml.safe_load(f) or {}
+
+TARGET_ANNOTATION_FPS = int(need("TARGET_ANNOTATION_FPS", workflow_cfg))
+SEGMENT_SIZE = int(need("SEGMENT_SIZE", gui_cfg))
+SEGMENT_OVERLAP = int(need("SEGMENT_OVERLAP", gui_cfg))
 
 PROJECT_ID = get_int_env_var("PROJECT_ID")
 

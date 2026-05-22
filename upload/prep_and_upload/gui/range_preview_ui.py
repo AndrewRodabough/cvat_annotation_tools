@@ -4,14 +4,14 @@ import time
 
 import cv2
 
-from cv_ui_common import (
+from upload.prep_and_upload.gui.cv_ui_common import (
     draw_scrubber,
     restore_terminal_after_cv,
     seekable_duration_seconds,
     suppress_stderr,
     time_from_scrubber_x,
 )
-from range_selection import finalize_ranges
+from upload.range_selection import finalize_ranges
 
 
 SCRUB_SEEK_THROTTLE_S = 0.12

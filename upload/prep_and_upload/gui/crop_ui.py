@@ -4,7 +4,12 @@ import time
 
 import cv2
 
-from cv_ui_common import draw_scrubber, restore_terminal_after_cv, suppress_stderr, time_from_scrubber_x
+from upload.prep_and_upload.gui.cv_ui_common import (
+    draw_scrubber,
+    restore_terminal_after_cv,
+    suppress_stderr,
+    time_from_scrubber_x,
+)
 
 
 SCRUB_SEEK_THROTTLE_S = 0.12

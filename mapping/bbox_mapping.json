@@ -1,0 +1,10 @@
+{
+  "metadata": {
+    "name": "onnx-wongkinyiu-yolov7",
+    "input_format": "yolov7_bbox",
+    "output_format": "bbox"
+  },
+  "data": {
+      "person": "bbox"
+  }
+}

@@ -1,6 +1,8 @@
 {
   "metadata": {
-    "name": "pth-vitpose-plus-plus-wholebody"
+    "name": "pth-vitpose-plus-plus-wholebody",
+    "input_format": "coco_wholebody",
+    "output_format": "custom_28"
   },
   "data": {
     "body": {

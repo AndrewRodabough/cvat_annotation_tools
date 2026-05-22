@@ -1,7 +1,6 @@
 import argparse
 import mimetypes
 import os
-import sys
 import time
 from pathlib import Path
 import requests
@@ -9,7 +8,6 @@ from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 
 project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 from utils.get_env import get_int_env_var, get_str_env_var
 
@@ -32,6 +30,7 @@ def create_task_for_video(task_name: str, project_id: int = PROJECT_ID) -> int:
     payload = {
         "name": task_name,
         "project_id": project_id,
+        "media_type": "image",
     }
 
     resp = requests.post(url, auth=_auth(), json=payload, timeout=60)
