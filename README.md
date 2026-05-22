@@ -73,7 +73,7 @@ Quick examples — see the full guides in `docs/` for details.
 - Prepare, trim and upload clips (interactive):
 
 ```bash
-python3 upload/prep_and_upload_tool.py
+python3 run/prep_and_upload.py
 ```
 
 - Trigger a CVAT lambda auto-annotation using a mapping file:
