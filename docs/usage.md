@@ -21,6 +21,8 @@ upload configuration can be  modified in
 
 
 ## Auto Annotation
+Tools for automatically annotating images using nuclio functions<br>
+See [Nuclio Setup](/docs/nuclio_setup.md) for more info about setting up models
 
 ### Trigger Nuclio Auto-Annotation
 run an auto-annotation for a task through cvat
@@ -33,6 +35,7 @@ python3 ./run/auto_annotate.py
 
 # Optional Arguments
 --project-id <int>      # override default project id from .env
+--replace-existing      # replaces all existing annotation
 ```
 
 ### Local Annotation and Upload
@@ -50,7 +53,7 @@ python3 ./run/manual_annotation_by_bbox.py
 # Optional Arguments
 --project-id <int>      # override default project id from .env
 --dry-run               # returns results rather than trying to upload them
---replace-existing      # replaces existing annotation  
+--replace-existing      # replaces all existing annotation
 ```
 
 ## Clean Up
