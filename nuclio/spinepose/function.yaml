@@ -17,21 +17,56 @@ metadata:
             { "id": 0, "name": "C7", "type": "points", "attributes": [] },
             { "id": 1, "name": "T6", "type": "points", "attributes": [] },
             { "id": 2, "name": "T10", "type": "points", "attributes": [] },
-            { "id": 3, "name": "L5", "type": "points", "attributes": [] }
+            { "id": 3, "name": "L5", "type": "points", "attributes": [] },
+            { "id": 4, "name": "nose", "type": "points", "attributes": [] },
+            { "id": 5, "name": "left_eye", "type": "points", "attributes": [] },
+            { "id": 6, "name": "right_eye", "type": "points", "attributes": [] },
+            { "id": 7, "name": "left_ear", "type": "points", "attributes": [] },
+            { "id": 8, "name": "right_ear", "type": "points", "attributes": [] },
+            { "id": 9, "name": "left_shoulder", "type": "points", "attributes": [] },
+            { "id": 10, "name": "right_shoulder", "type": "points", "attributes": [] },
+            { "id": 11, "name": "left_elbow", "type": "points", "attributes": [] },
+            { "id": 12, "name": "right_elbow", "type": "points", "attributes": [] },
+            { "id": 13, "name": "left_wrist", "type": "points", "attributes": [] },
+            { "id": 14, "name": "right_wrist", "type": "points", "attributes": [] },
+            { "id": 15, "name": "left_hip", "type": "points", "attributes": [] },
+            { "id": 16, "name": "right_hip", "type": "points", "attributes": [] },
+            { "id": 17, "name": "left_knee", "type": "points", "attributes": [] },
+            { "id": 18, "name": "right_knee", "type": "points", "attributes": [] },
+            { "id": 19, "name": "left_ankle", "type": "points", "attributes": [] },
+            { "id": 20, "name": "right_ankle", "type": "points", "attributes": [] },
+            { "id": 21, "name": "head", "type": "points", "attributes": [] },
+            { "id": 22, "name": "neck", "type": "points", "attributes": [] },
+            { "id": 23, "name": "hip", "type": "points", "attributes": [] },
+            { "id": 24, "name": "left_big_toe", "type": "points", "attributes": [] },
+            { "id": 25, "name": "right_big_toe", "type": "points", "attributes": [] },
+            { "id": 26, "name": "left_small_toe", "type": "points", "attributes": [] },
+            { "id": 27, "name": "right_small_toe", "type": "points", "attributes": [] },
+            { "id": 28, "name": "left_heel", "type": "points", "attributes": [] },
+            { "id": 29, "name": "right_heel", "type": "points", "attributes": [] },
+            { "id": 30, "name": "spine_01", "type": "points", "attributes": [] },
+            { "id": 31, "name": "spine_02", "type": "points", "attributes": [] },
+            { "id": 32, "name": "spine_03", "type": "points", "attributes": [] },
+            { "id": 33, "name": "spine_04", "type": "points", "attributes": [] },
+            { "id": 34, "name": "spine_05", "type": "points", "attributes": [] },
+            { "id": 35, "name": "left_latissimus", "type": "points", "attributes": [] },
+            { "id": 36, "name": "right_latissimus", "type": "points", "attributes": [] },
+            { "id": 37, "name": "left_clavicle", "type": "points", "attributes": [] },
+            { "id": 38, "name": "right_clavicle", "type": "points", "attributes": [] },
+            { "id": 39, "name": "neck_02", "type": "points", "attributes": [] },
+            { "id": 40, "name": "neck_03", "type": "points", "attributes": [] }
           ]
         }
       ]
-
 spec:
   handler: main:handler
   runtime: python:3.10
   image: cvat.pth.spinetrack.spinepose:latest
-
+  description: Spine pose estimation from full-body tracking for biomechanical dance analysis
   resources:
     requests:
       cpu: "25m"
       memory: "1Mi"
-
   build:
     image: cvat.pth.spinetrack.spinepose
     baseImage: pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
@@ -41,7 +76,6 @@ spec:
           value: apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 libxcb1 libx11-6 && rm -rf /var/lib/apt/lists/*
         - kind: RUN
           value: pip install spinepose opencv-python-headless numpy
-
   platform:
     attributes:
       network: cvat_cvat

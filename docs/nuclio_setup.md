@@ -81,7 +81,6 @@ Custom models from this repository are located in the /nuclio folder. Because th
 nuctl deploy --project-name cvat \
   --path ./nuclio/<model-name> \
   --platform local \
-  --run-flags "--network cvat"
 ```
 
 **GPU Deployment:**
@@ -89,8 +88,7 @@ nuctl deploy --project-name cvat \
 ```bash
 nuctl deploy --project-name cvat \
   --path ./nuclio/<model-name> \
-  --platform local \
-  --run-flags "--gpus all --network cvat"
+  --platform local
 ```
 
 ---

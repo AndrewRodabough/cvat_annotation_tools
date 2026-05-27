@@ -59,16 +59,66 @@ def handler(context, event):
         def fmt(p): 
             return [float(p[0]), float(p[1])]
 
+        def fmt_from_idx(idx):
+            if idx >= len(kpts):
+                return [0.0, 0.0]
+            return [to_coord(kpts[idx][0]), to_coord(kpts[idx][1])]
+
+        keypoint_names = [
+            "nose",
+            "left_eye",
+            "right_eye",
+            "left_ear",
+            "right_ear",
+            "left_shoulder",
+            "right_shoulder",
+            "left_elbow",
+            "right_elbow",
+            "left_wrist",
+            "right_wrist",
+            "left_hip",
+            "right_hip",
+            "left_knee",
+            "right_knee",
+            "left_ankle",
+            "right_ankle",
+            "head",
+            "neck",
+            "hip",
+            "left_big_toe",
+            "right_big_toe",
+            "left_small_toe",
+            "right_small_toe",
+            "left_heel",
+            "right_heel",
+            "spine_01",
+            "spine_02",
+            "spine_03",
+            "spine_04",
+            "spine_05",
+            "left_latissimus",
+            "right_latissimus",
+            "left_clavicle",
+            "right_clavicle",
+            "neck_02",
+            "neck_03",
+        ]
+
+        elements = [
+            {"label": "C7",  "type": "points", "points": fmt(c7)},
+            {"label": "T6",  "type": "points", "points": fmt(t6)},
+            {"label": "T10", "type": "points", "points": fmt(t10)},
+            {"label": "L5",  "type": "points", "points": fmt(l5)},
+        ]
+
+        for idx, name in enumerate(keypoint_names):
+            elements.append({"label": name, "type": "points", "points": fmt_from_idx(idx)})
+
         skeleton_data = {
             "confidence": 1.0,
             "label": "body",
             "type": "skeleton",
-            "elements": [
-                {"label": "C7",  "type": "points", "points": fmt(c7)},
-                {"label": "T6",  "type": "points", "points": fmt(t6)},
-                {"label": "T10", "type": "points", "points": fmt(t10)},
-                {"label": "L5",  "type": "points", "points": fmt(l5)}
-            ]
+            "elements": elements
         }
 
         context.logger.info("Successfully extracted and scaled spine sequence.")
